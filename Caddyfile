@@ -1,0 +1,3 @@
+clips.root.sx {
+    reverse_proxy localhost:3000
+}
