@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Media Server</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%8E%AC</text></svg>">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #111214;
+    color: #e8e8ea;
+  }
+  header {
+    padding: 24px 20px 12px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #8a8a90; font-size: 13px; }
+
+  main { max-width: 960px; margin: 0 auto; padding: 0 20px 60px; }
+
+  .dropzone {
+    margin-top: 20px;
+    border: 2px dashed #3a3b40;
+    border-radius: 12px;
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .dropzone:hover, .dropzone.drag { border-color: #6c7cff; background: #17181c; }
+  .dropzone input { display: none; }
+  .dropzone p { margin: 0; color: #a7a8ad; font-size: 14px; }
+
+  .progress-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .progress-item {
+    background: #1a1b1f; border-radius: 8px; padding: 10px 12px; font-size: 13px;
+  }
+  .progress-bar-track { height: 4px; background: #2a2b30; border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; background: #6c7cff; width: 0%; transition: width .1s; }
+  .progress-item.error .progress-bar-fill { background: #e05c5c; }
+  .progress-item.done .progress-bar-fill { background: #4caf7d; }
+
+  .grid {
+    margin-top: 28px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: #1a1b1f;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #232428;
+  }
+  .card video { width: 100%; display: block; background: #000; aspect-ratio: 16/9; }
+  .card-body { padding: 10px 12px 12px; }
+  .card-name {
+    font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .card-meta { font-size: 11px; color: #8a8a90; margin-top: 2px; }
+
+  .share-row {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #111214;
+    border: 1px solid #232428;
+    border-radius: 7px;
+    padding: 4px 4px 4px 10px;
+  }
+  .share-prefix { font-size: 12px; color: #65666c; white-space: nowrap; }
+  .share-input {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: none;
+    color: #e8e8ea;
+    font-size: 12px;
+    outline: none;
+    padding: 4px 0;
+  }
+  .share-row.editing { border-color: #6c7cff; }
+  .share-row button {
+    background: none; border: none; color: #8a8a90; cursor: pointer;
+    font-size: 11px; padding: 4px 6px; border-radius: 5px; white-space: nowrap;
+  }
+  .share-row button:hover { background: #232428; color: #e8e8ea; }
+  .share-row .slug-status {
+    font-size: 10px; padding: 0 4px; white-space: nowrap;
+  }
+  .share-row .slug-status.error { color: #e05c5c; }
+  .share-row .slug-status.ok { color: #4caf7d; }
+
+  .card-actions { margin-top: 8px; display: flex; gap: 8px; align-items: center; }
+  .card-actions button {
+    background: none; border: 1px solid #333; color: #b5b6bb; font-size: 11px;
+    padding: 4px 8px; border-radius: 6px; cursor: pointer;
+  }
+  .card-actions button:hover { border-color: #e05c5c; color: #e05c5c; }
+
+  .quality-select {
+    background: #111214; border: 1px solid #333; color: #b5b6bb; font-size: 11px;
+    padding: 4px 6px; border-radius: 6px; cursor: pointer;
+  }
+  .transcoding { font-size: 11px; color: #6b6c72; }
+
+  .empty { color: #6b6c72; font-size: 13px; margin-top: 30px; text-align: center; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Media Server</h1>
+    <div class="sub">Upload and watch — originals are served directly; a 720p copy is generated automatically.</div>
+  </header>
+
+  <main>
+    <label class="dropzone" id="dropzone">
+      <input id="fileInput" type="file" accept="video/*" multiple />
+      <p>Click to choose video files, or drag &amp; drop here</p>
+    </label>
+
+    <div class="progress-list" id="progressList"></div>
+
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty" style="display:none;">No videos uploaded yet.</div>
+  </main>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const progressList = document.getElementById('progressList');
+const grid = document.getElementById('grid');
+const emptyMsg = document.getElementById('empty');
+
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => uploadFiles(e.target.files));
+
+['dragover', 'dragleave', 'drop'].forEach(evt => {
+  dropzone.addEventListener(evt, e => {
+    e.preventDefault();
+    dropzone.classList.toggle('drag', evt === 'dragover');
+  });
+});
+dropzone.addEventListener('drop', e => uploadFiles(e.dataTransfer.files));
+
+function uploadFiles(fileList) {
+  [...fileList].forEach(uploadOne);
+}
+
+function uploadOne(file) {
+  const row = document.createElement('div');
+  row.className = 'progress-item';
+  row.innerHTML = `
+    <div>${escapeHtml(file.name)}</div>
+    <div class="progress-bar-track"><div class="progress-bar-fill"></div></div>
+  `;
+  progressList.appendChild(row);
+  const fill = row.querySelector('.progress-bar-fill');
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload');
+  xhr.upload.addEventListener('progress', e => {
+    if (e.lengthComputable) {
+      fill.style.width = (e.loaded / e.total * 100).toFixed(0) + '%';
+    }
+  });
+  xhr.onload = () => {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      row.classList.add('done');
+      fill.style.width = '100%';
+      setTimeout(() => row.remove(), 1500);
+      loadVideos();
+    } else {
+      row.classList.add('error');
+      row.querySelector('div').textContent += ' — upload failed';
+    }
+  };
+  xhr.onerror = () => {
+    row.classList.add('error');
+    row.querySelector('div').textContent += ' — upload failed';
+  };
+
+  const form = new FormData();
+  form.append('file', file);
+  xhr.send(form);
+}
+
+function formatViews(n) {
+  return `${n} view${n === 1 ? '' : 's'}`;
+}
+
+async function loadVideos() {
+  const res = await fetch('/api/videos');
+  const videos = await res.json();
+  grid.innerHTML = '';
+  emptyMsg.style.display = videos.length ? 'none' : 'block';
+
+  for (const v of videos) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <video controls preload="metadata" src="/files/${encodeURIComponent(v.stored_name)}" class="player"></video>
+      <div class="card-body">
+        <div class="card-name" title="${escapeHtml(v.original_name)}">${escapeHtml(v.original_name)}</div>
+        <div class="card-meta">${formatBytes(v.size_bytes)} · ${formatViews(v.views)} · ${v.uploaded_at}</div>
+
+        <div class="share-row" data-slug="${escapeAttr(v.slug)}">
+          <span class="share-prefix">/w/</span>
+          <input class="share-input" value="${escapeAttr(v.slug)}" spellcheck="false" />
+          <span class="slug-status"></span>
+          <button class="save-btn" style="display:none;">Save</button>
+          <button class="copy-btn">Copy link</button>
+          <button class="copy-direct-btn">Copy direct link</button>
+        </div>
+
+        <div class="card-actions">
+          <button class="delete-btn">Delete</button>
+          ${v.stored_name_720p
+            ? `<select class="quality-select"><option value="orig">Original</option><option value="720p">720p</option></select>`
+            : v.transcode_status === 'pending'
+              ? `<span class="transcoding">720p processing…</span>`
+              : ''}
+        </div>
+      </div>
+    `;
+
+    const shareRow = card.querySelector('.share-row');
+    const input = shareRow.querySelector('.share-input');
+    const status = shareRow.querySelector('.slug-status');
+    const saveBtn = shareRow.querySelector('.save-btn');
+    const copyBtn = shareRow.querySelector('.copy-btn');
+    const copyDirectBtn = shareRow.querySelector('.copy-direct-btn');
+
+    let currentSlug = v.slug;
+    // Tracked separately from currentSlug and kept in sync after a rename,
+    // so "Copy direct link" points at the renamed file immediately instead
+    // of the stale pre-rename name until the next loadVideos() poll.
+    let currentStoredName = v.stored_name;
+    let currentStoredName720p = v.stored_name_720p;
+
+    const qualitySelect = card.querySelector('.quality-select');
+    const player = card.querySelector('.player');
+
+    function shareUrl() {
+      return `${location.origin}/w/${currentSlug}`;
+    }
+
+    // "Copy direct link" always copies whichever quality is currently
+    // selected in the player, original by default.
+    function directUrl() {
+      const name = qualitySelect && qualitySelect.value === '720p'
+        ? currentStoredName720p
+        : currentStoredName;
+      return `${location.origin}/files/${encodeURIComponent(name)}`;
+    }
+
+    if (qualitySelect) {
+      qualitySelect.addEventListener('change', () => {
+        const wasPaused = player.paused;
+        const t = player.currentTime;
+        player.src = directUrl();
+        player.currentTime = t;
+        if (!wasPaused) player.play();
+      });
+    }
+
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    input.addEventListener('input', () => {
+      const changed = input.value !== currentSlug;
+      shareRow.classList.toggle('editing', changed);
+      saveBtn.style.display = changed ? 'inline-block' : 'none';
+      status.textContent = '';
+      status.className = 'slug-status';
+    });
+
+    saveBtn.addEventListener('click', async () => {
+      const newSlug = input.value.trim().toLowerCase();
+      saveBtn.disabled = true;
+      try {
+        const r = await fetch(`/api/videos/${v.id}/slug`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slug: newSlug }),
+        });
+        if (r.ok) {
+          const body = await r.json();
+          currentSlug = body.slug;
+          currentStoredName = body.stored_name;
+          currentStoredName720p = body.stored_name_720p;
+          input.value = currentSlug;
+          status.textContent = 'saved';
+          status.className = 'slug-status ok';
+          shareRow.classList.remove('editing');
+          saveBtn.style.display = 'none';
+        } else {
+          const msg = await r.text();
+          status.textContent = msg || 'failed';
+          status.className = 'slug-status error';
+        }
+      } catch {
+        status.textContent = 'network error';
+        status.className = 'slug-status error';
+      }
+      saveBtn.disabled = false;
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const ok = await copyText(shareUrl());
+      if (ok) {
+        const original = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => (copyBtn.textContent = original), 1200);
+      } else {
+        prompt('Copy this link:', shareUrl());
+      }
+    });
+
+    copyDirectBtn.addEventListener('click', async () => {
+      const ok = await copyText(directUrl());
+      if (ok) {
+        const original = copyDirectBtn.textContent;
+        copyDirectBtn.textContent = 'Copied!';
+        setTimeout(() => (copyDirectBtn.textContent = original), 1200);
+      } else {
+        prompt('Copy this link:', directUrl());
+      }
+    });
+
+    card.querySelector('.delete-btn').addEventListener('click', async () => {
+      await fetch('/api/videos/' + v.id, { method: 'DELETE' });
+      loadVideos();
+    });
+
+    grid.appendChild(card);
+  }
+
+  // While any video is still waiting on its 720p copy, check back every
+  // few seconds so the quality selector appears without a manual reload.
+  // Only one timer is ever pending at a time.
+  const stillPending = videos.some(v => v.transcode_status === 'pending');
+  if (stillPending && !pollScheduled) {
+    pollScheduled = true;
+    setTimeout(() => {
+      pollScheduled = false;
+      loadVideos();
+    }, 4000);
+  }
+}
+let pollScheduled = false;
+
+function formatBytes(n) {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return n.toFixed(1) + ' ' + units[i];
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function escapeAttr(s) {
+  return String(s).replace(/"/g, '&quot;');
+}
+
+// Arrow-key scrolling through the dashboard. Ignored while typing into a
+// slug input (ArrowLeft/Right need to move the text cursor there instead).
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'ArrowDown') {
+    window.scrollBy({ top: 200, behavior: 'smooth' });
+    e.preventDefault();
+  } else if (e.key === 'ArrowUp') {
+    window.scrollBy({ top: -200, behavior: 'smooth' });
+    e.preventDefault();
+  }
+});
+
+loadVideos();
+</script>
+</body>
+</html>
